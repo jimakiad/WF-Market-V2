@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WF Market - Order Manager</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        
+        .form-group {
+            margin-bottom: 25px;
+        }
+        
+        label {
+            display: block;
+            color: #333;
+            font-weight: 600;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+        }
+        
+        input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            margin-right: 10px;
+            accent-color: #667eea;
+        }
+        
+        input[type="radio"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            margin-right: 10px;
+            accent-color: #667eea;
+        }
+        
+        .checkbox-item label {
+            margin: 0;
+            font-weight: 500;
+            cursor: pointer;
+            flex: 1;
+        }
+        
+        input[type="number"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        input[type="number"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        button {
+            flex: 1;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        button.secondary {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+        
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        button:active:not(:disabled) {
+            transform: translateY(0);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .message {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            display: none;
+        }
+        
+        .message.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .message.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            color: #667eea;
+        }
+        
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WF Market Orders</h1>
+        <p class="subtitle">Configure and create your orders</p>
+        
+        <form id="orderForm">
+            <div class="form-group">
+                <label>Select Syndicate</label>
+                <div class="checkbox-group" id="factionCheckboxes">
+                    <p style="color: #999;">Loading syndicates...</p>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="platinum">Platinum Amount</label>
+                <input type="number" id="platinum" name="platinum" min="1" value="12" placeholder="Enter platinum amount" required />
+            </div>
+            
+            <div class="button-group">
+                <button type="button" id="deleteBtn" class="secondary">Delete Matching Orders</button>
+                <button type="submit" id="submitBtn">Create Orders</button>
+            </div>
+            
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Processing orders...</p>
+            </div>
+            
+            <div class="message" id="message"></div>
+        </form>
+    </div>
+    
+    <script>
+        // Check operation status on page load
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                // Check if there's an ongoing operation
+                const statusResponse = await fetch('/status');
+                
+                if (statusResponse.status === 401) {
+                    // Not logged in, redirect to login
+                    window.location.href = '/login';
+                    return;
+                }
+                
+                const statusData = await statusResponse.json();
+                const submitBtn = document.getElementById('submitBtn');
+                const deleteBtn = document.getElementById('deleteBtn');
+                const loading = document.getElementById('loading');
+                
+                if (statusData.operation_in_progress) {
+                    submitBtn.disabled = true;
+                    deleteBtn.disabled = true;
+                    loading.style.display = 'block';
+                    showMessage('Previous operation still in progress. Please wait...', 'error');
+                }
+                
+                // Load factions
+                try {
+                    const response = await fetch('/factions');
+                    const data = await response.json();
+                    
+                    if (data.factions && data.factions.length > 0) {
+                        const container = document.getElementById('factionCheckboxes');
+                        container.innerHTML = '';
+                        
+                        data.factions.forEach((faction, index) => {
+                            const radioId = 'faction-' + faction.toLowerCase().replace(/[^a-z0-9]/g, '-');
+                            const div = document.createElement('div');
+                            div.className = 'checkbox-item';
+                            div.innerHTML = `
+                                <input type="radio" id="${radioId}" name="faction" value="${faction}" ${index === 0 ? 'checked' : ''} />
+                                <label for="${radioId}">${faction}</label>
+                            `;
+                            container.appendChild(div);
+                        });
+                    } else {
+                        document.getElementById('factionCheckboxes').innerHTML = '<p style="color: #e74c3c;">Error loading syndicates</p>';
+                    }
+                } catch (error) {
+                    document.getElementById('factionCheckboxes').innerHTML = '<p style="color: #e74c3c;">Failed to load syndicates</p>';
+                    console.error('Error:', error);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        });
+        
+        document.getElementById('orderForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const selectedFaction = document.querySelector('input[name="faction"]:checked');
+            const platinum = parseInt(document.getElementById('platinum').value);
+            
+            if (!selectedFaction) {
+                showMessage('Please select a syndicate', 'error');
+                return;
+            }
+            
+            if (platinum <= 0) {
+                showMessage('Please enter a valid platinum amount', 'error');
+                return;
+            }
+            
+            const submitBtn = document.getElementById('submitBtn');
+            const deleteBtn = document.getElementById('deleteBtn');
+            const loading = document.getElementById('loading');
+            
+            submitBtn.disabled = true;
+            deleteBtn.disabled = true;
+            loading.style.display = 'block';
+            
+            try {
+                const response = await fetch('/process', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        factions: [selectedFaction.value],
+                        platinum: platinum
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showMessage(data.message, 'success');
+                } else if (response.status === 409) {
+                    showMessage('Operation already in progress. Please wait.', 'error');
+                } else {
+                    showMessage(data.error || 'An error occurred', 'error');
+                }
+            } catch (error) {
+                showMessage('Failed to process order: ' + error.message, 'error');
+            } finally {
+                submitBtn.disabled = false;
+                deleteBtn.disabled = false;
+                loading.style.display = 'none';
+            }
+        });
+        
+        document.getElementById('deleteBtn').addEventListener('click', async () => {
+            if (!confirm('Are you sure you want to delete all matching orders?')) {
+                return;
+            }
+            
+            const submitBtn = document.getElementById('submitBtn');
+            const deleteBtn = document.getElementById('deleteBtn');
+            const loading = document.getElementById('loading');
+            
+            submitBtn.disabled = true;
+            deleteBtn.disabled = true;
+            loading.style.display = 'block';
+            
+            try {
+                const response = await fetch('/delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showMessage(data.message, 'success');
+                } else if (response.status === 409) {
+                    showMessage('Operation already in progress. Please wait.', 'error');
+                } else {
+                    showMessage(data.error || 'An error occurred', 'error');
+                }
+            } catch (error) {
+                showMessage('Failed to delete orders: ' + error.message, 'error');
+            } finally {
+                submitBtn.disabled = false;
+                deleteBtn.disabled = false;
+                loading.style.display = 'none';
+            }
+        });
+        
+        function showMessage(text, type) {
+            const messageEl = document.getElementById('message');
+            messageEl.textContent = text;
+            messageEl.className = 'message ' + type;
+            messageEl.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
