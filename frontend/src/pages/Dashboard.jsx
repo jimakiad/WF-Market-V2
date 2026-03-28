@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Toast from '../components/Toast'
+import ModGrid from '../components/ModGrid'
 import './Dashboard.css'
 
 function Dashboard() {
@@ -10,6 +11,7 @@ function Dashboard() {
   const [loading, setLoading] = useState(false)
   const [loadingAction, setLoadingAction] = useState('')
   const [toasts, setToasts] = useState([])
+  const [activeTab, setActiveTab] = useState('batch')
   const navigate = useNavigate()
 
   const addToast = useCallback((message, type = 'success') => {
@@ -157,121 +159,162 @@ function Dashboard() {
             <p>Create and manage augment mod sell orders</p>
           </div>
 
-          <div className="dash-grid">
-            {/* Syndicate Selection */}
-            <section className="card syndicate-card">
-              <h2 className="card-title">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                  <circle cx="9" cy="7" r="4" />
-                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                </svg>
-                Select Syndicate
-              </h2>
-              <div className="syndicate-list">
-                {factions.length === 0 ? (
-                  <div className="syndicate-loading">Loading syndicates...</div>
-                ) : (
-                  factions.map((faction) => (
-                    <label
-                      key={faction}
-                      className={`syndicate-option ${selectedFaction === faction ? 'selected' : ''}`}
-                    >
-                      <input
-                        type="radio"
-                        name="faction"
-                        value={faction}
-                        checked={selectedFaction === faction}
-                        onChange={(e) => setSelectedFaction(e.target.value)}
-                      />
-                      <span className="radio-dot" />
-                      <span className="syndicate-name">{faction}</span>
-                    </label>
-                  ))
-                )}
-              </div>
-            </section>
-
-            {/* Order Configuration */}
-            <section className="card config-card">
-              <h2 className="card-title">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                </svg>
-                Configuration
-              </h2>
-
-              <div className="config-field">
-                <label htmlFor="platinum">Platinum per order</label>
-                <div className="platinum-input-wrap">
-                  <span className="platinum-icon">&#9830;</span>
-                  <input
-                    id="platinum"
-                    type="number"
-                    min="1"
-                    value={platinum}
-                    onChange={(e) => setPlatinum(parseInt(e.target.value) || 0)}
-                  />
-                </div>
-              </div>
-
-              <div className="config-summary">
-                <div className="summary-row">
-                  <span>Syndicate</span>
-                  <span className="summary-value">{selectedFaction || '—'}</span>
-                </div>
-                <div className="summary-row">
-                  <span>Price</span>
-                  <span className="summary-value">{platinum}p</span>
-                </div>
-              </div>
-
-              <div className="action-buttons">
-                <button
-                  className="btn btn-primary"
-                  onClick={handleCreateOrders}
-                  disabled={loading}
-                >
-                  {loading && loadingAction.includes('Creating') ? (
-                    <span className="btn-loading">
-                      <span className="spinner" />
-                      Creating...
-                    </span>
-                  ) : (
-                    <>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="12" y1="5" x2="12" y2="19" />
-                        <line x1="5" y1="12" x2="19" y2="12" />
-                      </svg>
-                      Create Orders
-                    </>
-                  )}
-                </button>
-                <button
-                  className="btn btn-danger"
-                  onClick={handleDeleteOrders}
-                  disabled={loading}
-                >
-                  {loading && loadingAction.includes('Deleting') ? (
-                    <span className="btn-loading">
-                      <span className="spinner spinner-light" />
-                      Deleting...
-                    </span>
-                  ) : (
-                    <>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                      </svg>
-                      Delete Orders
-                    </>
-                  )}
-                </button>
-              </div>
-            </section>
+          {/* Tab switcher */}
+          <div className="tabs">
+            <button
+              className={`tab ${activeTab === 'batch' ? 'active' : ''}`}
+              onClick={() => setActiveTab('batch')}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+              </svg>
+              Batch by Syndicate
+            </button>
+            <button
+              className={`tab ${activeTab === 'individual' ? 'active' : ''}`}
+              onClick={() => setActiveTab('individual')}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="12" y1="18" x2="12" y2="12" />
+                <line x1="9" y1="15" x2="15" y2="15" />
+              </svg>
+              Individual Mods
+            </button>
           </div>
+
+          {/* Batch tab (existing functionality) */}
+          {activeTab === 'batch' && (
+            <div className="dash-grid">
+              <section className="card syndicate-card">
+                <h2 className="card-title">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                    <circle cx="9" cy="7" r="4" />
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                  </svg>
+                  Select Syndicate
+                </h2>
+                <div className="syndicate-list">
+                  {factions.length === 0 ? (
+                    <div className="syndicate-loading">Loading syndicates...</div>
+                  ) : (
+                    factions.map((faction) => (
+                      <label
+                        key={faction}
+                        className={`syndicate-option ${selectedFaction === faction ? 'selected' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name="faction"
+                          value={faction}
+                          checked={selectedFaction === faction}
+                          onChange={(e) => setSelectedFaction(e.target.value)}
+                        />
+                        <span className="radio-dot" />
+                        <span className="syndicate-name">{faction}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              </section>
+
+              <section className="card config-card">
+                <h2 className="card-title">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                  </svg>
+                  Configuration
+                </h2>
+
+                <div className="config-field">
+                  <label htmlFor="platinum">Platinum per order</label>
+                  <div className="platinum-input-wrap">
+                    <span className="platinum-icon">&#9830;</span>
+                    <input
+                      id="platinum"
+                      type="number"
+                      min="1"
+                      value={platinum}
+                      onChange={(e) => setPlatinum(parseInt(e.target.value) || 0)}
+                    />
+                  </div>
+                </div>
+
+                <div className="config-summary">
+                  <div className="summary-row">
+                    <span>Syndicate</span>
+                    <span className="summary-value">{selectedFaction || '—'}</span>
+                  </div>
+                  <div className="summary-row">
+                    <span>Price</span>
+                    <span className="summary-value">{platinum}p</span>
+                  </div>
+                </div>
+
+                <div className="action-buttons">
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleCreateOrders}
+                    disabled={loading}
+                  >
+                    {loading && loadingAction.includes('Creating') ? (
+                      <span className="btn-loading">
+                        <span className="spinner" />
+                        Creating...
+                      </span>
+                    ) : (
+                      <>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="12" y1="5" x2="12" y2="19" />
+                          <line x1="5" y1="12" x2="19" y2="12" />
+                        </svg>
+                        Create Orders
+                      </>
+                    )}
+                  </button>
+                  <button
+                    className="btn btn-danger"
+                    onClick={handleDeleteOrders}
+                    disabled={loading}
+                  >
+                    {loading && loadingAction.includes('Deleting') ? (
+                      <span className="btn-loading">
+                        <span className="spinner spinner-light" />
+                        Deleting...
+                      </span>
+                    ) : (
+                      <>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                        Delete Orders
+                      </>
+                    )}
+                  </button>
+                </div>
+              </section>
+            </div>
+          )}
+
+          {/* Individual mods tab */}
+          {activeTab === 'individual' && (
+            <ModGrid
+              factions={factions}
+              selectedFaction={selectedFaction}
+              onFactionChange={setSelectedFaction}
+              platinum={platinum}
+              onPlatinumChange={setPlatinum}
+              addToast={addToast}
+            />
+          )}
 
           {/* Loading overlay */}
           {loading && (

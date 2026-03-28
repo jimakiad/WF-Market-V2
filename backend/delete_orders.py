@@ -1,13 +1,17 @@
+import os
 import requests
 import json
 import time
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, 'data')
+
 def delete_matching_orders(JWT: str, API_URL: str, platform: str = "pc", language: str = "en"):
     
-    with open("augment_mods_by_syndicate.json", "r", encoding="utf-8") as f:
+    with open(os.path.join(DATA_DIR, 'augment_mods_by_syndicate.json'), 'r', encoding='utf-8') as f:
         augment_data = json.load(f)
 
-    with open("orders.json", "r", encoding="utf-8") as f:
+    with open(os.path.join(DATA_DIR, 'orders.json'), 'r', encoding='utf-8') as f:
         orders_data = json.load(f)
 
     headers = {

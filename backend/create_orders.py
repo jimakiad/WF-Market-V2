@@ -1,6 +1,10 @@
+import os
 import requests
 import json
 import time
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, 'data')
 
 QUANTITY = 1
 
@@ -16,7 +20,7 @@ def create_orders(JWT: str, API_URL: str, syndicates: list = None, platinum: int
         platform: Platform (default: "pc")
         language: Language (default: "en")
     """
-    with open("augment_mods_by_syndicate.json", "r", encoding="utf-8") as f:
+    with open(os.path.join(DATA_DIR, 'augment_mods_by_syndicate.json'), 'r', encoding='utf-8') as f:
         mods_data = json.load(f)
 
     # If syndicates not provided, use interactive mode
@@ -75,7 +79,7 @@ def create_orders(JWT: str, API_URL: str, syndicates: list = None, platinum: int
                 except Exception as e:
                     print(f"Error creating order for {mod['Name']}: {e}")
 
-                with open("augment_mods_by_syndicate.json", "w", encoding="utf-8") as f:
+                with open(os.path.join(DATA_DIR, 'augment_mods_by_syndicate.json'), 'w', encoding='utf-8') as f:
                     json.dump(mods_data, f, indent=4, ensure_ascii=False)
 
                 time.sleep(0.1)
