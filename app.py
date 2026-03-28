@@ -1,6 +1,6 @@
 import os
 import json
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import Flask, request, jsonify, session, redirect, url_for, send_from_directory
 from functools import wraps
 import threading
 
@@ -11,7 +11,10 @@ from login import login
 from create_orders import create_orders
 from delete_orders import delete_matching_orders
 
-app = Flask(__name__)
+# Serve React build from static/react
+REACT_BUILD = os.path.join(os.path.dirname(__file__), 'static', 'react')
+
+app = Flask(__name__, static_folder=REACT_BUILD, static_url_path='')
 app.secret_key = os.urandom(24)
 
 WFM_API = "https://api.warframe.market"
@@ -30,6 +33,9 @@ def require_login(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_logged_in' not in session:
+            # For API requests, return 401 so the React app can redirect
+            if request.path.startswith('/api') or request.is_json or request.headers.get('Accept') == 'application/json':
+                return jsonify({'error': 'Not authenticated'}), 401
             return redirect(url_for('login_page'))
         return f(*args, **kwargs)
     return decorated_function
@@ -45,8 +51,8 @@ def get_available_factions():
 
 @app.route('/login', methods=['GET'])
 def login_page():
-    """Display login page"""
-    return render_template('login.html')
+    """Serve React app for login"""
+    return send_from_directory(REACT_BUILD, 'index.html')
 
 @app.route('/api/login', methods=['POST'])
 def api_login():
@@ -82,7 +88,7 @@ def logout():
 @app.route('/')
 @require_login
 def index():
-    return render_template('index.html')
+    return send_from_directory(REACT_BUILD, 'index.html')
 
 @app.route('/status', methods=['GET'])
 @require_login

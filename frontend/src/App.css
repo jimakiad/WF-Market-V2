@@ -1,0 +1,50 @@
+/* App-level layout */
+.app-layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Toast notification */
+.toast-container {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toast {
+  padding: 14px 20px;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  font-weight: 500;
+  box-shadow: var(--shadow-lg);
+  animation: slide-in 0.3s ease-out;
+  max-width: 400px;
+}
+
+.toast.success {
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid rgba(54, 211, 153, 0.2);
+}
+
+.toast.error {
+  background: var(--error-bg);
+  color: var(--danger);
+  border: 1px solid rgba(231, 76, 94, 0.2);
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}

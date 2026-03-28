@@ -17334,7 +17334,7 @@
             "maxRank": 3,
             "i18n": {
                 "en": {
-                    "name": "Repelling Bastille",
+                    "name": "Enduring Bastille",
                     "icon": "items/images/en/repelling_bastille.342178f3f8cdb716c8545e5d4fa03227.png",
                     "thumb": "items/images/en/thumbs/repelling_bastille.342178f3f8cdb716c8545e5d4fa03227.128x128.png"
                 }
@@ -38308,7 +38308,7 @@
                 "flawless",
                 "radiant"
             ],
-            "vaulted": false,
+            "vaulted": true,
             "i18n": {
                 "en": {
                     "name": "Requiem IV Relic",
@@ -38332,7 +38332,7 @@
                 "flawless",
                 "radiant"
             ],
-            "vaulted": false,
+            "vaulted": true,
             "i18n": {
                 "en": {
                     "name": "Requiem III Relic",
@@ -38356,7 +38356,7 @@
                 "flawless",
                 "radiant"
             ],
-            "vaulted": false,
+            "vaulted": true,
             "i18n": {
                 "en": {
                     "name": "Requiem II Relic",
@@ -38380,7 +38380,7 @@
                 "flawless",
                 "radiant"
             ],
-            "vaulted": false,
+            "vaulted": true,
             "i18n": {
                 "en": {
                     "name": "Requiem I Relic",
@@ -53222,7 +53222,7 @@
                 "prime",
                 "warframe"
             ],
-            "ducats": 100,
+            "ducats": 65,
             "i18n": {
                 "en": {
                     "name": "Garuda Prime Systems Blueprint",
@@ -53447,7 +53447,7 @@
                 "prime",
                 "set"
             ],
-            "ducats": 260,
+            "ducats": 225,
             "i18n": {
                 "en": {
                     "name": "Garuda Prime Set",
@@ -55864,7 +55864,7 @@
                 "primary",
                 "set"
             ],
-            "ducats": 260,
+            "ducats": 225,
             "i18n": {
                 "en": {
                     "name": "Phantasma Prime Set",
@@ -56064,7 +56064,7 @@
                 "weapon",
                 "prime"
             ],
-            "ducats": 100,
+            "ducats": 65,
             "i18n": {
                 "en": {
                     "name": "Phantasma Prime Stock",
@@ -56962,7 +56962,7 @@
                 "warframe",
                 "blueprint"
             ],
-            "ducats": 100,
+            "ducats": 65,
             "i18n": {
                 "en": {
                     "name": "Baruuk Prime Neuroptics Blueprint",
@@ -57029,7 +57029,7 @@
                 "warframe",
                 "set"
             ],
-            "ducats": 260,
+            "ducats": 225,
             "i18n": {
                 "en": {
                     "name": "Baruuk Prime Set",
@@ -59362,7 +59362,7 @@
                 "warframe",
                 "blueprint"
             ],
-            "ducats": 100,
+            "ducats": 65,
             "i18n": {
                 "en": {
                     "name": "Wisp Prime Chassis Blueprint",
@@ -59526,7 +59526,7 @@
                 "warframe",
                 "set"
             ],
-            "ducats": 260,
+            "ducats": 225,
             "i18n": {
                 "en": {
                     "name": "Wisp Prime Set",
@@ -67540,7 +67540,7 @@
             "maxRank": 5,
             "i18n": {
                 "en": {
-                    "name": "Summoner\u2019s Wrath",
+                    "name": "Summoner's Wrath",
                     "icon": "items/images/en/summoner\u2019s_wrath.53ad60a1b30fed0603d8693ff5cefa65.webp",
                     "thumb": "items/images/en/thumbs/summoner\u2019s_wrath.53ad60a1b30fed0603d8693ff5cefa65.128x128.webp"
                 }
@@ -71423,7 +71423,7 @@
                 "flawless",
                 "radiant"
             ],
-            "vaulted": false,
+            "vaulted": true,
             "i18n": {
                 "en": {
                     "name": "Lith L6 Relic",
@@ -72275,7 +72275,7 @@
                 "flawless",
                 "radiant"
             ],
-            "vaulted": true,
+            "vaulted": false,
             "i18n": {
                 "en": {
                     "name": "Lith L7 Relic",
@@ -72978,6 +72978,105 @@
                     "name": "Zid-an Osbok",
                     "icon": "items/images/en/zid-an-osbok.bea2033c8ac9089bcff1ea005cdff694.webp",
                     "thumb": "items/images/en/thumbs/zid-an-osbok.bea2033c8ac9089bcff1ea005cdff694.128x128.webp"
+                }
+            }
+        },
+        {
+            "id": "69988d58bdd67bd33c02704b",
+            "slug": "primed_ammo_chain",
+            "gameRef": "/Lotus/Upgrades/Mods/Archwing/Rifle/Expert/ArchwingRifleAmmoMaxModExpert",
+            "tags": [
+                "primary",
+                "archwing",
+                "legendary",
+                "mod",
+                "archgun"
+            ],
+            "maxRank": 10,
+            "i18n": {
+                "en": {
+                    "name": "Primed Ammo Chain",
+                    "icon": "items/images/en/primed_ammo_chain.09ebc62670431d28f40cdb4e984b8031.webp",
+                    "thumb": "items/images/en/thumbs/primed_ammo_chain.09ebc62670431d28f40cdb4e984b8031.128x128.webp"
+                }
+            }
+        },
+        {
+            "id": "69c52958bb986142bb6e02bb",
+            "slug": "requiem_eterna_relic",
+            "gameRef": "/Lotus/Types/Game/Projections/T5VoidProjectionImmortalOmniA",
+            "tags": [
+                "requiem",
+                "relic"
+            ],
+            "subtypes": [
+                "intact",
+                "exceptional",
+                "flawless",
+                "radiant"
+            ],
+            "vaulted": false,
+            "i18n": {
+                "en": {
+                    "name": "Requiem Eterna Relic",
+                    "icon": "items/unknown.png",
+                    "thumb": "items/unknown.thumb.png"
+                }
+            }
+        },
+        {
+            "id": "69c52999bb986142bb6e02bd",
+            "slug": "velox_conclusion",
+            "gameRef": "/Lotus/Upgrades/Mods/Pistol/Event/Nightwave/NightwaveVeloxAugmentMod",
+            "tags": [
+                "mod",
+                "rare",
+                "secondary",
+                "velox"
+            ],
+            "maxRank": 5,
+            "i18n": {
+                "en": {
+                    "name": "Velox Conclusion",
+                    "icon": "items/images/en/velox_conclusion.262d73bffbeb1616ca77c70a6b1276ea.webp",
+                    "thumb": "items/images/en/thumbs/velox_conclusion.262d73bffbeb1616ca77c70a6b1276ea.128x128.webp"
+                }
+            }
+        },
+        {
+            "id": "69c529b5bb986142bb6e02bf",
+            "slug": "sentient_incision",
+            "gameRef": "/Lotus/Upgrades/Mods/Melee/Event/Nightwave/NightwaveVenatoAugmentMod",
+            "tags": [
+                "mod",
+                "rare",
+                "melee",
+                "venato"
+            ],
+            "maxRank": 5,
+            "i18n": {
+                "en": {
+                    "name": "Sentient Incision",
+                    "icon": "items/images/en/sentient_incision.e801e7c7e05711a4e1452e8458361656.webp",
+                    "thumb": "items/images/en/thumbs/sentient_incision.e801e7c7e05711a4e1452e8458361656.128x128.webp"
+                }
+            }
+        },
+        {
+            "id": "69c529ffbb986142bb6e02c1",
+            "slug": "truths_flame",
+            "gameRef": "/Lotus/Upgrades/EmpoweredHeavyMelee/CursedSyndicateEmpoweredHeavyMeleeMod",
+            "tags": [
+                "mod",
+                "rare",
+                "melee"
+            ],
+            "maxRank": 3,
+            "i18n": {
+                "en": {
+                    "name": "Truth's Flame",
+                    "icon": "items/images/en/truths_flame.9c178f8ac7817f08081e34dfd2f7b9df.webp",
+                    "thumb": "items/images/en/thumbs/truths_flame.9c178f8ac7817f08081e34dfd2f7b9df.128x128.webp"
                 }
             }
         }
