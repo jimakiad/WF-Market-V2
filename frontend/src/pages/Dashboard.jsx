@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import Toast from '../components/Toast'
 import ModGrid from '../components/ModGrid'
 import './Dashboard.css'
+import { requestNotificationPermission } from '../utils/notifications'
 
 function Dashboard() {
   const [factions, setFactions] = useState([])
@@ -13,6 +14,9 @@ function Dashboard() {
   const [toasts, setToasts] = useState([])
   const [activeTab, setActiveTab] = useState('batch')
   const navigate = useNavigate()
+  const [notificationsEnabled, setNotificationsEnabled] = useState(
+    typeof Notification !== 'undefined' && Notification.permission === 'granted'
+  )
 
   const addToast = useCallback((message, type = 'success') => {
     const id = Date.now()
@@ -56,6 +60,14 @@ function Dashboard() {
     }
     loadData()
   }, [navigate, addToast])
+
+  // optional: request permission on first load (keeps non-blocking)
+  useEffect(() => {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      // don't await here to avoid blocking
+      requestNotificationPermission()
+    }
+  }, [])
 
   const handleCreateOrders = async () => {
     if (!selectedFaction) {
@@ -127,6 +139,21 @@ function Dashboard() {
     window.location.href = '/logout'
   }
 
+  const enableNotifications = async () => {
+    try {
+      const granted = await requestNotificationPermission()
+      if (!granted) {
+        addToast('Notification permission denied', 'error')
+        return
+      }
+
+      setNotificationsEnabled(true)
+      addToast('Notifications enabled', 'success')
+    } catch (err) {
+      addToast('Failed to enable notifications', 'error')
+    }
+  }
+
   return (
     <div className="dashboard">
       <Toast toasts={toasts} onRemove={removeToast} />
@@ -141,6 +168,12 @@ function Dashboard() {
             </svg>
             <span>WF Market</span>
           </div>
+          {!notificationsEnabled && (
+            <button className="btn enable-notif-btn" onClick={enableNotifications}>
+              Enable Notifications
+            </button>
+          )}
+
           <button className="logout-btn" onClick={handleLogout}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />

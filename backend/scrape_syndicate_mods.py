@@ -29,11 +29,11 @@ def scrape_syndicate_mods():
 
         for row in table.find_all("tr")[1:]: 
             cols = row.find_all("td")
-            if len(cols) < 3:
+            if len(cols) < 2:
                 continue
 
-            mods_col = cols[1]
-            synd_col = cols[2]
+            mods_col = cols[0]
+            synd_col = cols[1]
 
             mod_spans = mods_col.find_all("span", {"data-param-source": "Mods"})
             mod_names = [span["data-param-name"].strip() for span in mod_spans]
