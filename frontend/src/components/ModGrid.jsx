@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import PropTypes from 'prop-types'
 import './ModGrid.css'
 
 function ModGrid({ factions, selectedFaction, onFactionChange, platinum, onPlatinumChange, addToast }) {
@@ -199,6 +200,15 @@ function ModGrid({ factions, selectedFaction, onFactionChange, platinum, onPlati
       )}
     </div>
   )
+}
+
+ModGrid.propTypes = {
+  factions: PropTypes.arrayOf(PropTypes.string).isRequired,
+  selectedFaction: PropTypes.string.isRequired,
+  onFactionChange: PropTypes.func.isRequired,
+  platinum: PropTypes.number.isRequired,
+  onPlatinumChange: PropTypes.func.isRequired,
+  addToast: PropTypes.func.isRequired,
 }
 
 export default ModGrid

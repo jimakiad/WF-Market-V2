@@ -13,6 +13,7 @@ function Dashboard() {
   const [loadingAction, setLoadingAction] = useState('')
   const [toasts, setToasts] = useState([])
   const [activeTab, setActiveTab] = useState('batch')
+  const [pendingJobId, setPendingJobId] = useState(null)
   const navigate = useNavigate()
   const [notificationsEnabled, setNotificationsEnabled] = useState(
     typeof Notification !== 'undefined' && Notification.permission === 'granted'
@@ -44,22 +45,58 @@ function Dashboard() {
         }
 
         const statusData = await statusRes.json()
-        if (statusData.operation_in_progress) {
+        if (statusData.job?.state === 'running') {
+          setPendingJobId(statusData.job.id)
           setLoading(true)
           setLoadingAction('Previous operation still in progress...')
         }
 
         const factionsData = await factionsRes.json()
+        if (!factionsRes.ok) throw new Error(factionsData.error || 'Failed to load syndicates')
         if (factionsData.factions?.length > 0) {
           setFactions(factionsData.factions)
           setSelectedFaction(factionsData.factions[0])
         }
-      } catch {
-        addToast('Failed to connect to server', 'error')
+      } catch (error) {
+        addToast(error.message || 'Failed to connect to server', 'error')
       }
     }
     loadData()
   }, [navigate, addToast])
+
+  useEffect(() => {
+    if (!pendingJobId) return
+    let cancelled = false
+    let timer
+    const poll = async () => {
+      try {
+        const response = await fetch('/status')
+        if (cancelled) return
+        if (response.status === 401) {
+          navigate('/login')
+          return
+        }
+        if (!response.ok) throw new Error('Status unavailable')
+        const data = await response.json()
+        if (cancelled) return
+        if (data.job?.id !== pendingJobId) {
+          addToast('Operation status was lost. Check your listings before retrying.', 'error')
+        } else if (data.job.state === 'running') {
+          timer = setTimeout(poll, 2000)
+          return
+        } else {
+          addToast(data.job.message, data.job.state === 'complete' ? 'success' : 'error')
+        }
+        setPendingJobId(null)
+        setLoading(false)
+        setLoadingAction('')
+      } catch {
+        if (!cancelled) timer = setTimeout(poll, 4000)
+      }
+    }
+    timer = setTimeout(poll, 1000)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [pendingJobId, navigate, addToast])
 
   // optional: request permission on first load (keeps non-blocking)
   useEffect(() => {
@@ -91,7 +128,10 @@ function Dashboard() {
 
       const data = await response.json()
 
-      if (response.ok) {
+      if (response.status === 202) {
+        setPendingJobId(data.job_id)
+        return
+      } else if (response.ok) {
         addToast(data.message, 'success')
       } else if (response.status === 409) {
         addToast('Operation already in progress', 'error')
@@ -100,10 +140,9 @@ function Dashboard() {
       }
     } catch {
       addToast('Failed to create orders', 'error')
-    } finally {
-      setLoading(false)
-      setLoadingAction('')
     }
+    setLoading(false)
+    setLoadingAction('')
   }
 
   const handleDeleteOrders = async () => {
@@ -120,7 +159,10 @@ function Dashboard() {
 
       const data = await response.json()
 
-      if (response.ok) {
+      if (response.status === 202) {
+        setPendingJobId(data.job_id)
+        return
+      } else if (response.ok) {
         addToast(data.message, 'success')
       } else if (response.status === 409) {
         addToast('Operation already in progress', 'error')
@@ -129,14 +171,19 @@ function Dashboard() {
       }
     } catch {
       addToast('Failed to delete orders', 'error')
-    } finally {
-      setLoading(false)
-      setLoadingAction('')
     }
+    setLoading(false)
+    setLoadingAction('')
   }
 
-  const handleLogout = () => {
-    window.location.href = '/logout'
+  const handleLogout = async () => {
+    try {
+      const response = await fetch('/logout', { method: 'POST' })
+      if (!response.ok) throw new Error('Logout failed')
+      navigate('/login')
+    } catch {
+      addToast('Could not sign out. Please try again.', 'error')
+    }
   }
 
   const enableNotifications = async () => {
@@ -149,7 +196,7 @@ function Dashboard() {
 
       setNotificationsEnabled(true)
       addToast('Notifications enabled', 'success')
-    } catch (err) {
+    } catch {
       addToast('Failed to enable notifications', 'error')
     }
   }

@@ -1,87 +1,30 @@
-import os
+"""Create orders from this account's live listings, without shared user files."""
 import requests
-import json
-import time
+from get_orders import get_orders
+from wfm_client import api_request, auth_headers
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(BASE_DIR, 'data')
 
-QUANTITY = 1
-
-def create_orders(JWT: str, API_URL: str, syndicates: list = None, platinum: int = 12, platform: str = "pc", language: str = "en"):
-    """
-    Create orders for specified syndicates with given platinum price.
-    
-    Args:
-        JWT: Authentication token
-        API_URL: Base API URL
-        syndicates: List of syndicate names to create orders for. If None, prompts user.
-        platinum: Platinum price per order (default: 12)
-        platform: Platform (default: "pc")
-        language: Language (default: "en")
-    """
-    with open(os.path.join(DATA_DIR, 'augment_mods_by_syndicate.json'), 'r', encoding='utf-8') as f:
-        mods_data = json.load(f)
-
-    # If syndicates not provided, use interactive mode
-    if syndicates is None:
-        available_syndicates = list(mods_data.keys())
-        print("Available syndicates:")
-        for synd in available_syndicates:
-            print(f"- {synd}")
-
-        while True:
-            selected_synd = input("Enter the syndicate name: ").strip()
-            if selected_synd in mods_data:
-                syndicates = [selected_synd]
-                break
-            else:
-                print("Invalid syndicate name. Please enter one exactly as shown above.")
-    
-    # Validate syndicates
-    syndicates = [s for s in syndicates if s in mods_data]
-    if not syndicates:
-        print("Error: No valid syndicates provided.")
-        return
-
-    headers = {
-        "Accept": "application/json",
-        "Authorization": JWT.replace("JWT", "Bearer"),
-        "platform": platform,
-        "language": language,
+def create_orders(token, api_url, mods_data, syndicates, platinum):
+    orders = get_orders(token, api_url)['data']
+    listed = {order['itemId'] for order in orders if order.get('type') == 'sell'}
+    selected = {
+        mod['id']: mod['Name'] for syndicate in syndicates
+        for mod in mods_data[syndicate] if mod.get('id')
     }
-
-    for selected_synd in syndicates:
-        print(f"\nProcessing orders for syndicate: {selected_synd}")
-        
-        for mod in mods_data[selected_synd]:
-            if "id" in mod and "orderId" not in mod:
-                body = {
-                    "itemId": mod["id"],
-                    "type": "sell",
-                    "platinum": platinum,
-                    "quantity": QUANTITY,
-                    "visible": True,
-                    "rank": 0
-                }
-
-                try:
-                    response = requests.post(API_URL + "/v2/order", json=body, headers=headers)
-                    response.raise_for_status()
-                    data = response.json()
-
-                    if data.get("data") and "id" in data["data"]:
-                        mod["orderId"] = data["data"]["id"]
-                        print(f"Created order for {mod['Name']} -> {mod['orderId']}")
-                    else:
-                        print(f"Warning: No order ID returned for {mod['Name']}")
-
-                except Exception as e:
-                    print(f"Error creating order for {mod['Name']}: {e}")
-
-                with open(os.path.join(DATA_DIR, 'augment_mods_by_syndicate.json'), 'w', encoding='utf-8') as f:
-                    json.dump(mods_data, f, indent=4, ensure_ascii=False)
-
-                time.sleep(0.1)
-
-    print("\nAll orders processed.")
+    result = {'created': 0, 'skipped': 0, 'failed': [], 'unprocessed': 0}
+    for index, (item_id, name) in enumerate(selected.items()):
+        if item_id in listed:
+            result['skipped'] += 1
+            continue
+        try:
+            api_request('POST', f'{api_url}/v2/order', headers=auth_headers(token), json={
+                'itemId': item_id, 'type': 'sell', 'platinum': platinum,
+                'quantity': 1, 'visible': True, 'rank': 0,
+            })
+            result['created'] += 1
+        except requests.RequestException:
+            # A timed-out write may have succeeded. Never automatically retry it.
+            result['failed'].append(name)
+            result['unprocessed'] = len(selected) - index - 1
+            break
+    return result

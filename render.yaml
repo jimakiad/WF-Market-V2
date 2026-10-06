@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: wf-market-v2
+    runtime: python
+    plan: free
+    region: frankfurt
+    buildCommand: bash scripts/render-build.sh
+    startCommand: gunicorn --chdir backend app:app --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 60 --access-logfile - --error-logfile -
+    healthCheckPath: /healthz
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      - key: PYTHONUNBUFFERED
+        value: "1"

@@ -1,411 +1,333 @@
 import os
 import sys
-import json
-import requests as http_requests
-from flask import Flask, request, jsonify, session, redirect, url_for, send_from_directory
-from functools import wraps
 import threading
+import time
+import uuid
+from datetime import timedelta
+from functools import wraps
+from urllib.parse import urlsplit
 
-# Ensure sibling modules (get_all_items, login, etc.) are importable regardless
-# of where the process is launched from (project root or backend/).
+import requests
+from flask import Flask, jsonify, redirect, request, send_from_directory, session, url_for
+from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
+
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
-from get_all_items import get_all_items as func_get_all_items
-from get_orders import get_orders as func_get_orders
-from scrape_syndicate_mods import scrape_syndicate_mods
-from login import login
 from create_orders import create_orders
 from delete_orders import delete_matching_orders
+from get_all_items import get_all_items
+from get_orders import get_orders
+from login import login
+from scrape_syndicate_mods import scrape_syndicate_mods
+from wfm_client import api_request, auth_headers
 
-# Anchor all paths to the project root (one level above this file)
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(BASE_DIR, 'data')
+BASE_DIR = os.path.dirname(_BACKEND_DIR)
 REACT_BUILD = os.path.join(BASE_DIR, 'static', 'react')
+WFM_API = 'https://api.warframe.market'
+ON_RENDER = os.environ.get('RENDER') == 'true'
+secret_key = os.environ.get('SECRET_KEY')
+if ON_RENDER and not secret_key:
+    raise RuntimeError('SECRET_KEY must be configured on Render')
 
 app = Flask(__name__, static_folder=REACT_BUILD, static_url_path='')
-app.secret_key = os.urandom(24)
+app.config.update(
+    SECRET_KEY=secret_key or os.urandom(32),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SECURE=os.environ.get('SESSION_COOKIE_SECURE', str(ON_RENDER)).lower() == 'true',
+    SESSION_COOKIE_SAMESITE='Lax',
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
+    MAX_CONTENT_LENGTH=16 * 1024,
+)
+if ON_RENDER:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1)
 
-WFM_API = "https://api.warframe.market"
-
-if not WFM_API:
-    raise RuntimeError("Missing required environment variable: WFM_API")
-
-JWT = None
-operation_lock = threading.Lock()
-operation_in_progress = False
-
-# initialize_jwt removed — authentication must be performed via the login page
-
-def require_login(f):
-    """Decorator to require user to be logged in"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'user_logged_in' not in session:
-            # For API requests, return 401 so the React app can redirect
-            if request.path.startswith('/api') or request.is_json or request.headers.get('Accept') == 'application/json':
-                return jsonify({'error': 'Not authenticated'}), 401
-            return redirect(url_for('login_page'))
-        return f(*args, **kwargs)
-    return decorated_function
-
-def get_available_factions():
-    """Load available factions from augment_mods_by_syndicate.json"""
-    try:
-        with open(os.path.join(DATA_DIR, 'augment_mods_by_syndicate.json'), 'r', encoding='utf-8') as f:
-            mods_data = json.load(f)
-        return list(mods_data.keys())
-    except FileNotFoundError:
-        return []
-
-def _bootstrap(jwt_token: str):
-    """Fetch all items + scrape syndicate mods after login so item IDs are populated."""
-    try:
-        os.makedirs(DATA_DIR, exist_ok=True)
-        items_data = func_get_all_items(jwt_token, WFM_API)
-        if items_data:
-            with open(os.path.join(DATA_DIR, 'items.json'), 'w', encoding='utf-8') as f:
-                json.dump(items_data, f, indent=4)
-            scrape_syndicate_mods()
-    except Exception as exc:
-        print(f'[bootstrap] {exc}')
+# Only public catalogue data is shared. User orders always come from WFM.
+catalogue_lock = threading.Lock()
+catalogue = None
+catalogue_updated = 0.0
+operations_lock = threading.Lock()
+operations = {}
+batch_jobs = {}
+login_slots = threading.BoundedSemaphore(2)
+MAX_ACTIVE_OPERATIONS = 8
 
 
-def _refresh_orders_async(jwt_token: str):
-    """Fetch the latest user orders from WFM and persist to orders.json."""
-    def _run():
+def require_login(func):
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        if not session.get('jwt_token'):
+            if request.path == '/':
+                return redirect(url_for('login_page'))
+            return jsonify(error='Not authenticated'), 401
+        return func(*args, **kwargs)
+    return wrapped
+
+
+@app.before_request
+def check_origin():
+    if request.method in ('POST', 'DELETE', 'PUT', 'PATCH'):
+        origin = request.headers.get('Origin')
+        if request.headers.get('Sec-Fetch-Site') == 'cross-site':
+            return jsonify(error='Please use this website to perform this action'), 403
+        if origin and urlsplit(origin).netloc != request.host:
+            return jsonify(error='Please use this website to perform this action'), 403
+
+
+@app.after_request
+def response_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    if request.path != '/healthz' and not request.path.startswith('/assets/'):
+        response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+@app.errorhandler(requests.RequestException)
+def upstream_error(error):
+    status = getattr(error.response, 'status_code', None)
+    if status in (401, 403):
+        session.clear()
+        return jsonify(error='Warframe Market rejected authentication. Please sign in again.'), 401
+    if status == 429:
+        return jsonify(error='Warframe Market is busy. Please wait before trying again.'), 503
+    return jsonify(error='Could not complete the Warframe Market request. Check your orders before retrying.'), 502
+
+
+@app.errorhandler(HTTPException)
+def http_error(error):
+    return jsonify(error=error.description), error.code
+
+
+def get_catalogue(token):
+    global catalogue, catalogue_updated
+    with catalogue_lock:
+        if catalogue is None or time.monotonic() - catalogue_updated > 6 * 3600:
+            try:
+                items = get_all_items(token, WFM_API)['data']
+                mods = scrape_syndicate_mods(items)
+                thumbs = {
+                    item['id']: f"https://warframe.market/static/assets/{item['i18n']['en']['thumb']}"
+                    for item in items if item.get('i18n', {}).get('en', {}).get('thumb')
+                }
+                catalogue = {'mods': mods, 'thumbs': thumbs}
+                catalogue_updated = time.monotonic()
+            except Exception:
+                if catalogue is None:
+                    raise
+                app.logger.warning('Catalogue refresh failed; using previous public catalogue')
+        return catalogue
+
+
+def account_id():
+    return session['user_name'].casefold()
+
+
+def reserve_operation(user, kind):
+    now = time.monotonic()
+    with operations_lock:
+        for key in list(operations):
+            entry = operations[key]
+            if entry['state'] != 'running' and now - entry['updated'] > 3600:
+                del operations[key]
+        for key in list(batch_jobs):
+            entry = batch_jobs[key]
+            if entry['state'] != 'running' and now - entry['updated'] > 3600:
+                del batch_jobs[key]
+        if operations.get(user, {}).get('state') == 'running':
+            return None, (jsonify(error='An operation is already running for your account'), 409)
+        if sum(entry['state'] == 'running' for entry in operations.values()) >= MAX_ACTIVE_OPERATIONS:
+            return None, (jsonify(error='The server is busy. Please try again shortly.'), 503)
+        job = {'id': uuid.uuid4().hex, 'kind': kind, 'state': 'running', 'updated': now}
+        operations[user] = job
+        if kind != 'single':
+            batch_jobs[user] = job
+        return job, None
+
+
+def finish_operation(user, job, **result):
+    with operations_lock:
+        if operations.get(user) is job:
+            job.update(updated=time.monotonic(), **result)
+
+
+def start_batch(user, token, kind, factions=None, platinum=None):
+    job, error = reserve_operation(user, kind)
+    if error:
+        return error
+
+    def run():
         try:
-            data = func_get_orders(jwt_token, WFM_API)
-            if data:
-                with open(os.path.join(DATA_DIR, 'orders.json'), 'w', encoding='utf-8') as f:
-                    json.dump(data, f, indent=4)
-        except Exception as exc:
-            print(f'[refresh_orders] {exc}')
-    threading.Thread(target=_run, daemon=True).start()
+            mods = get_catalogue(token)['mods']
+            if kind == 'create':
+                result = create_orders(token, WFM_API, mods, factions, platinum)
+                message = f"Created {result['created']} orders; skipped {result['skipped']} existing listings."
+            else:
+                result = delete_matching_orders(token, WFM_API, mods)
+                message = f"Deleted {result['deleted']} augment sell orders."
+            if result['failed']:
+                message += ' The batch stopped after an unconfirmed request. Check your listings before retrying.'
+            finish_operation(user, job, state='failed' if result['failed'] else 'complete', message=message, result=result)
+        except Exception:
+            app.logger.warning('Batch operation failed (%s)', kind)
+            finish_operation(user, job, state='failed', message='The batch could not finish. Check your listings and sign in again before retrying.')
+
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify(success=True, job_id=job['id'], message='Batch started'), 202
 
 
-@app.route('/login', methods=['GET'])
+def positive_price(value):
+    return isinstance(value, int) and not isinstance(value, bool) and 0 < value <= 1_000_000
+
+
+@app.route('/healthz')
+def health():
+    return jsonify(status='ok'), 200
+
+
+@app.route('/login')
 def login_page():
-    """Serve React app for login"""
     return send_from_directory(REACT_BUILD, 'index.html')
+
 
 @app.route('/api/login', methods=['POST'])
 def api_login():
-    """Handle login"""
+    data = request.get_json()
+    if not isinstance(data, dict):
+        return jsonify(error='Email and password required'), 400
+    email, password = data.get('email'), data.get('password')
+    if not isinstance(email, str) or not isinstance(password, str) or not email.strip() or not password:
+        return jsonify(error='Email and password required'), 400
+    if not login_slots.acquire(blocking=False):
+        return jsonify(error='Sign-in is busy. Please try again shortly.'), 429
     try:
-        data = request.get_json()
-        email = data.get('email')
-        password = data.get('password')
-        
-        if not email or not password:
-            return jsonify({'error': 'Email and password required'}), 400
-        
-        # Try to login with provided credentials
-        user_name, jwt_token = login(email, password, WFM_API)
-        
-        if jwt_token:
-            session['user_logged_in'] = True
-            session['user_email'] = email
-            session['jwt_token'] = jwt_token
-            # Bootstrap item + mod data in the background so IDs are always fresh
-            threading.Thread(target=_bootstrap, args=(jwt_token,), daemon=True).start()
-            return jsonify({'success': True}), 200
-        else:
-            return jsonify({'error': 'Invalid credentials'}), 401
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/logout', methods=['GET'])
-def logout():
-    """Logout user"""
+        user_name, token = login(email.strip(), password, WFM_API)
+    finally:
+        login_slots.release()
+    if not token or not user_name:
+        return jsonify(error='Invalid credentials'), 401
     session.clear()
-    return redirect(url_for('login_page'))
+    session.permanent = True
+    session['user_name'] = user_name
+    session['jwt_token'] = token
+    return jsonify(success=True)
+
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return jsonify(success=True)
+
 
 @app.route('/')
 @require_login
 def index():
     return send_from_directory(REACT_BUILD, 'index.html')
 
-@app.route('/status', methods=['GET'])
-@require_login
-def get_status():
-    """Check if an operation is in progress"""
-    return jsonify({'operation_in_progress': operation_in_progress}), 200
 
-@app.route('/factions', methods=['GET'])
+@app.route('/status')
 @require_login
-def get_factions():
-    """Return available factions"""
+def status():
+    with operations_lock:
+        job = batch_jobs.get(account_id())
+        active = operations.get(account_id(), {}).get('state') == 'running'
+        public_job = {key: value for key, value in job.items() if key != 'updated'} if job else None
+        return jsonify(operation_in_progress=active, job=public_job)
+
+
+@app.route('/factions')
+@require_login
+def factions():
     try:
-        factions = get_available_factions()
-        return jsonify({'factions': factions}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(factions=list(get_catalogue(session['jwt_token'])['mods']))
+    except requests.RequestException:
+        raise
+    except Exception:
+        return jsonify(error='Could not load syndicate data. Please reload to try again.'), 503
 
-@app.route('/factions/<faction_name>/mods', methods=['GET'])
+
+@app.route('/factions/<faction_name>/mods')
 @require_login
-def get_faction_mods(faction_name):
-    """Return mods for a specific faction with thumbnail URLs and live order status"""
-    jwt_token = session.get('jwt_token')
-    try:
-        with open(os.path.join(DATA_DIR, 'augment_mods_by_syndicate.json'), 'r', encoding='utf-8') as f:
-            mods_data = json.load(f)
+def faction_mods(faction_name):
+    data = get_catalogue(session['jwt_token'])
+    if faction_name not in data['mods']:
+        return jsonify(error='Faction not found'), 404
+    orders = get_orders(session['jwt_token'], WFM_API)['data']
+    listed = {order['itemId']: order['id'] for order in orders if order.get('type') == 'sell'}
+    return jsonify(faction=faction_name, mods=[{
+        'name': mod['Name'], 'url_name': mod['URL_Name'], 'id': mod.get('id'),
+        'has_order': mod.get('id') in listed, 'order_id': listed.get(mod.get('id')),
+        'thumb': data['thumbs'].get(mod.get('id'), ''),
+    } for mod in data['mods'][faction_name]])
 
-        if faction_name not in mods_data:
-            return jsonify({'error': 'Faction not found'}), 404
-
-        # Build id->thumb lookup from items.json
-        thumb_map = {}
-        try:
-            with open(os.path.join(DATA_DIR, 'items.json'), 'r', encoding='utf-8') as f:
-                items = json.load(f).get('data', [])
-            for item in items:
-                i18n = item.get('i18n', {}).get('en', {})
-                if i18n.get('thumb'):
-                    thumb_map[item['id']] = f"https://warframe.market/static/assets/{i18n['thumb']}"
-        except FileNotFoundError:
-            pass
-
-        # Fetch live sell orders from WFM — this is the single source of truth
-        live_order_map = {}  # item_id -> order_id
-        try:
-            orders_data = func_get_orders(jwt_token, WFM_API)
-            for order in orders_data.get('data', []):
-                if order.get('type') == 'sell':
-                    live_order_map[order['itemId']] = order['id']
-        except Exception:
-            pass
-
-        mods = []
-        for mod in mods_data[faction_name]:
-            mod_id = mod.get('id')
-            order_id = live_order_map.get(mod_id) if mod_id else None
-            mod_entry = {
-                'name': mod.get('Name', ''),
-                'url_name': mod.get('URL_Name', ''),
-                'id': mod_id,
-                'has_order': order_id is not None,
-                'order_id': order_id,
-                'thumb': thumb_map.get(mod_id, ''),
-            }
-            mods.append(mod_entry)
-
-        return jsonify({'faction': faction_name, 'mods': mods}), 200
-    except FileNotFoundError:
-        return jsonify({'error': 'Mod data not available. Run a syndicate process first.'}), 404
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/delete', methods=['POST'])
-@require_login
-def delete_orders():
-    """Delete matching orders"""
-    global operation_in_progress, JWT
-    
-    if operation_in_progress:
-        return jsonify({'error': 'Operation already in progress'}), 409
-
-    # Require JWT from session (login page must provide it)
-    jwt_token = session.get('jwt_token')
-    if not jwt_token:
-        return jsonify({'error': 'Not authenticated'},), 401
-
-    try:
-        with operation_lock:
-            operation_in_progress = True
-        
-        # Fetch latest orders data
-        orders_data = func_get_orders(jwt_token, WFM_API)
-        with open(os.path.join(DATA_DIR, 'orders.json'), 'w', encoding='utf-8') as f:
-            json.dump(orders_data, f, indent=4)
-        
-        # Delete matching orders
-        delete_matching_orders(jwt_token, WFM_API)
-
-        # Refresh orders.json to reflect deletions
-        try:
-            fresh = func_get_orders(jwt_token, WFM_API)
-            if fresh:
-                with open(os.path.join(DATA_DIR, 'orders.json'), 'w', encoding='utf-8') as f:
-                    json.dump(fresh, f, indent=4)
-        except Exception:
-            pass
-
-        return jsonify({'success': True, 'message': 'Matching orders deleted successfully'}), 200
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    
-    finally:
-        with operation_lock:
-            operation_in_progress = False
 
 @app.route('/process', methods=['POST'])
 @require_login
-def process_order():
-    """Create orders for selected syndicates"""
-    global operation_in_progress, JWT
-    
-    if operation_in_progress:
-        return jsonify({'error': 'Operation already in progress'}), 409
-    
-    try:
-        with operation_lock:
-            operation_in_progress = True
-        
-        data = request.get_json()
-        factions = data.get('factions', [])
-        platinum = data.get('platinum', 0)
-        
-        if not factions or platinum <= 0:
-            return jsonify({'error': 'Please select at least one faction and enter a valid platinum amount'}), 400
-        
-        # Validate factions
-        available_factions = get_available_factions()
-        invalid_factions = [f for f in factions if f not in available_factions]
-        if invalid_factions:
-            return jsonify({'error': f'Invalid factions: {", ".join(invalid_factions)}'}), 400
-        
-        # Require JWT from session (login page must provide it)
-        jwt_token = session.get('jwt_token')
-        if not jwt_token:
-            return jsonify({'error': 'Not authenticated'},), 401
-        
-        # Fetch latest data
-        items_data = func_get_all_items(jwt_token, WFM_API)
-        with open(os.path.join(DATA_DIR, 'items.json'), 'w', encoding='utf-8') as f:
-            json.dump(items_data, f, indent=4)
-        
-        orders_data = func_get_orders(jwt_token, WFM_API)
-        with open(os.path.join(DATA_DIR, 'orders.json'), 'w', encoding='utf-8') as f:
-            json.dump(orders_data, f, indent=4)
-        
-        # Update augments and process orders
-        scrape_syndicate_mods()
-        create_orders(jwt_token, WFM_API, syndicates=factions, platinum=platinum)
+def process():
+    data = request.get_json()
+    if not isinstance(data, dict):
+        return jsonify(error='Select syndicates and enter a price'), 400
+    selected, platinum = data.get('factions'), data.get('platinum')
+    if not isinstance(selected, list) or not selected or not all(isinstance(name, str) for name in selected):
+        return jsonify(error='Select at least one syndicate'), 400
+    if not positive_price(platinum):
+        return jsonify(error='Platinum must be a positive whole number'), 400
+    mods = get_catalogue(session['jwt_token'])['mods']
+    if any(name not in mods for name in selected):
+        return jsonify(error='Invalid syndicate'), 400
+    return start_batch(account_id(), session['jwt_token'], 'create', selected, platinum)
 
-        # Refresh orders.json to reflect newly created orders
-        try:
-            fresh = func_get_orders(jwt_token, WFM_API)
-            if fresh:
-                with open(os.path.join(DATA_DIR, 'orders.json'), 'w', encoding='utf-8') as f:
-                    json.dump(fresh, f, indent=4)
-        except Exception:
-            pass
 
-        return jsonify({'success': True, 'message': f'Orders processed for {", ".join(factions)} with {platinum} platinum'}), 200
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    
-    finally:
-        with operation_lock:
-            operation_in_progress = False
+@app.route('/delete', methods=['POST'])
+@require_login
+def delete_batch():
+    return start_batch(account_id(), session['jwt_token'], 'delete')
+
 
 @app.route('/api/mod/order', methods=['POST'])
 @require_login
-def create_single_mod_order():
-    """Create a sell order for a single mod by item ID"""
-    jwt_token = session.get('jwt_token')
-    if not jwt_token:
-        return jsonify({'error': 'Not authenticated'}), 401
-
+def create_single_order():
     data = request.get_json()
-    item_id = data.get('item_id')
-    platinum = data.get('platinum', 12)
-
-    if not item_id:
-        return jsonify({'error': 'item_id is required'}), 400
-    if platinum <= 0:
-        return jsonify({'error': 'Platinum must be > 0'}), 400
-
-    headers = {
-        "Accept": "application/json",
-        "Authorization": jwt_token.replace("JWT", "Bearer"),
-        "platform": "pc",
-        "language": "en",
-    }
-    body = {
-        "itemId": item_id,
-        "type": "sell",
-        "platinum": platinum,
-        "quantity": 1,
-        "visible": True,
-        "rank": 0,
-    }
-
+    if not isinstance(data, dict):
+        return jsonify(error='Item and price required'), 400
+    item_id, platinum = data.get('item_id'), data.get('platinum', 12)
+    if not isinstance(item_id, str) or not item_id:
+        return jsonify(error='item_id is required'), 400
+    if not positive_price(platinum):
+        return jsonify(error='Platinum must be a positive whole number'), 400
+    user, token = account_id(), session['jwt_token']
+    job, error = reserve_operation(user, 'single')
+    if error:
+        return error
     try:
-        resp = http_requests.post(f"{WFM_API}/v2/order", json=body, headers=headers)
-        resp.raise_for_status()
-        result = resp.json()
-        order_id = result.get('data', {}).get('id')
-
-        # Persist orderId into augment_mods_by_syndicate.json so re-fetch shows correct status
-        if order_id:
-            augment_path = os.path.join(DATA_DIR, 'augment_mods_by_syndicate.json')
-            try:
-                with open(augment_path, 'r', encoding='utf-8') as f:
-                    augment_data = json.load(f)
-                for mods_list in augment_data.values():
-                    for mod in mods_list:
-                        if mod.get('id') == item_id:
-                            mod['orderId'] = order_id
-                with open(augment_path, 'w', encoding='utf-8') as f:
-                    json.dump(augment_data, f, indent=4, ensure_ascii=False)
-            except Exception:
-                pass  # non-fatal — order was created, persistence is best-effort
-
-        return jsonify({'success': True, 'order_id': order_id}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
+        response = api_request('POST', f'{WFM_API}/v2/order', headers=auth_headers(token), json={
+            'itemId': item_id, 'type': 'sell', 'platinum': platinum,
+            'quantity': 1, 'visible': True, 'rank': 0,
+        })
+        return jsonify(success=True, order_id=response.json()['data']['id'])
     finally:
-        # Keep orders.json in sync after creation
-        _refresh_orders_async(jwt_token)
+        finish_operation(user, job, state='complete')
+
 
 @app.route('/api/mod/order/<order_id>', methods=['DELETE'])
 @require_login
-def delete_single_mod_order(order_id):
-    """Delete a single order by order ID"""
-    jwt_token = session.get('jwt_token')
-    if not jwt_token:
-        return jsonify({'error': 'Not authenticated'}), 401
-
-    headers = {
-        "Accept": "application/json",
-        "Authorization": jwt_token.replace("JWT", "Bearer"),
-        "platform": "pc",
-        "language": "en",
-    }
-
+def delete_single_order(order_id):
+    user, token = account_id(), session['jwt_token']
+    job, error = reserve_operation(user, 'single')
+    if error:
+        return error
     try:
-        resp = http_requests.delete(f"{WFM_API}/v2/order/{order_id}", headers=headers)
-        resp.raise_for_status()
-
-        # Remove the stale orderId from augment JSON so the fallback path is clean
-        augment_path = os.path.join(DATA_DIR, 'augment_mods_by_syndicate.json')
-        try:
-            with open(augment_path, 'r', encoding='utf-8') as f:
-                augment_data = json.load(f)
-            for mods_list in augment_data.values():
-                for mod in mods_list:
-                    if mod.get('orderId') == order_id:
-                        del mod['orderId']
-                        break
-            with open(augment_path, 'w', encoding='utf-8') as f:
-                json.dump(augment_data, f, indent=4, ensure_ascii=False)
-        except Exception:
-            pass  # non-fatal
-
-        return jsonify({'success': True}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        orders = get_orders(token, WFM_API)['data']
+        if not any(order.get('id') == order_id and order.get('type') == 'sell' for order in orders):
+            return jsonify(error='Sell order not found for your account'), 404
+        api_request('DELETE', f'{WFM_API}/v2/order/{order_id}', headers=auth_headers(token))
+        return jsonify(success=True)
     finally:
-        # Keep orders.json in sync after deletion
-        _refresh_orders_async(jwt_token)
+        finish_operation(user, job, state='complete')
+
 
 if __name__ == '__main__':
-    os.makedirs(DATA_DIR, exist_ok=True)
-    app.run(debug=True, use_reloader=False)
+    app.run(host='127.0.0.1', port=5000, debug=os.environ.get('FLASK_DEBUG') == '1', use_reloader=False)

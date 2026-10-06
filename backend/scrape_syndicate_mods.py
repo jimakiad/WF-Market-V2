@@ -7,7 +7,9 @@ import json
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 
-def scrape_syndicate_mods():
+def scrape_syndicate_mods(items_data=None):
+    """Return public catalogue data; persist only when used as a local script."""
+    persist = items_data is None
 
     def normalize_name(name: str) -> str:
         return name.lower().replace(" ", "_").replace("'", "").replace("\u2019", "")
@@ -17,7 +19,7 @@ def scrape_syndicate_mods():
         return re.sub(r'[^a-z0-9_]', '', name.lower().replace(' ', '_'))
 
     def scrape_augment_mods(url: str = "https://wiki.warframe.com/w/Warframe_Augment_Mods"):
-        response = requests.get(url)
+        response = requests.get(url, timeout=(5, 20))
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
 
@@ -53,10 +55,13 @@ def scrape_syndicate_mods():
                     if mod_entry not in mods_by_syndicate[synd]:
                         mods_by_syndicate[synd].append(mod_entry)
 
+        if not mods_by_syndicate:
+            raise ValueError('The wiki did not return any syndicate mods')
         return mods_by_syndicate
 
-    with open(os.path.join(DATA_DIR, 'items.json'), 'r', encoding='utf-8') as f:
-        items_data = json.load(f)["data"]
+    if persist:
+        with open(os.path.join(DATA_DIR, 'items.json'), 'r', encoding='utf-8') as f:
+            items_data = json.load(f)["data"]
 
     # Primary lookup: WFM slug
     slug_to_id = {item["slug"]: item["id"] for item in items_data}
@@ -84,7 +89,9 @@ def scrape_syndicate_mods():
             if mod_id:
                 mod["id"] = mod_id
 
-    with open(os.path.join(DATA_DIR, 'augment_mods_by_syndicate.json'), 'w', encoding='utf-8') as f:
-        json.dump(mods_data, f, indent=4, ensure_ascii=False)
+    if persist:
+        with open(os.path.join(DATA_DIR, 'augment_mods_by_syndicate.json'), 'w', encoding='utf-8') as f:
+            json.dump(mods_data, f, indent=4, ensure_ascii=False)
 
     print(f"Scraped {sum(len(v) for v in mods_data.values())} mods from {len(mods_data)} syndicates")
+    return mods_data

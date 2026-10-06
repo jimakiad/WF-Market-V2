@@ -1,4 +1,4 @@
-import requests
+from wfm_client import api_request
 import json
 
 def login(
@@ -17,7 +17,5 @@ def login(
         "language": language,
     }
     content = {"email": user_email, "password": user_password, "auth_type": "header"}
-    response = requests.post(f"{WFM_API}/v1/auth/signin", data=json.dumps(content), headers=headers)
-    if response.status_code != 200:
-        return None, None
+    response = api_request('POST', f"{WFM_API}/v1/auth/signin", data=json.dumps(content), headers=headers)
     return (response.json()["payload"]["user"]["ingame_name"], response.headers["Authorization"])

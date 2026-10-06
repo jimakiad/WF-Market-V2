@@ -1,4 +1,4 @@
-import requests
+from wfm_client import api_request
 
 def get_orders(JWT: str, WFM_API: str, platform: str = "pc", language: str = "en"):
     """
@@ -11,8 +11,5 @@ def get_orders(JWT: str, WFM_API: str, platform: str = "pc", language: str = "en
         "platform": platform,
         "language": language,
     }
-    response = requests.get(f"{WFM_API}/v2/orders/my", headers=headers)
-    #print(response)
-    if response.status_code != 200:
-        return None, None
+    response = api_request('GET', f"{WFM_API}/v2/orders/my", headers=headers)
     return (response.json())

@@ -1,4 +1,4 @@
-import requests
+from wfm_client import api_request
 
 def get_all_items(JWT: str, WFM_API: str, platform: str = "pc", language: str = "en"):
         
@@ -12,8 +12,5 @@ def get_all_items(JWT: str, WFM_API: str, platform: str = "pc", language: str = 
         "platform": platform,
         "language": language,
     }
-    response = requests.get(f"{WFM_API}/v2/items", headers=headers)
-    if response.status_code != 200:
-        print(f"Failed to get items. Status code: {response.status_code}, Status Error: {response.json()}")
-        return None
+    response = api_request('GET', f"{WFM_API}/v2/items", headers=headers)
     return response.json()

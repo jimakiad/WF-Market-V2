@@ -1,3 +1,4 @@
+import PropTypes from 'prop-types'
 import './Toast.css'
 
 function Toast({ toasts, onRemove }) {
@@ -29,6 +30,15 @@ function Toast({ toasts, onRemove }) {
       ))}
     </div>
   )
+}
+
+Toast.propTypes = {
+  toasts: PropTypes.arrayOf(PropTypes.shape({
+    id: PropTypes.number.isRequired,
+    message: PropTypes.string.isRequired,
+    type: PropTypes.string.isRequired,
+  })).isRequired,
+  onRemove: PropTypes.func.isRequired,
 }
 
 export default Toast
