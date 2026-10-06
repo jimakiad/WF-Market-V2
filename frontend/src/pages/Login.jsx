@@ -30,6 +30,7 @@ function Login() {
     } catch {
       setError('Connection failed. Is the server running?')
     } finally {
+      setPassword('')
       setLoading(false)
     }
   }

@@ -8,7 +8,7 @@ from functools import wraps
 from urllib.parse import urlsplit
 
 import requests
-from flask import Flask, jsonify, redirect, request, send_from_directory, session, url_for
+from flask import Flask, g, jsonify, redirect, request, send_from_directory, session, url_for
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -23,6 +23,7 @@ from get_orders import get_orders
 from login import login
 from scrape_syndicate_mods import scrape_syndicate_mods
 from wfm_client import api_request, auth_headers
+from security import LoginLimiter, SessionStore, client_address
 
 BASE_DIR = os.path.dirname(_BACKEND_DIR)
 REACT_BUILD = os.path.join(BASE_DIR, 'static', 'react')
@@ -40,9 +41,11 @@ app.config.update(
     SESSION_COOKIE_SAMESITE='Lax',
     PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
     MAX_CONTENT_LENGTH=16 * 1024,
+    SESSION_REFRESH_EACH_REQUEST=False,
 )
 if ON_RENDER:
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1)
+    # Client addresses are resolved separately from the trusted side of the chain.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=0, x_proto=1)
 
 # Only public catalogue data is shared. User orders always come from WFM.
 catalogue_lock = threading.Lock()
@@ -52,27 +55,41 @@ operations_lock = threading.Lock()
 operations = {}
 batch_jobs = {}
 login_slots = threading.BoundedSemaphore(2)
+auth_sessions = SessionStore()
+login_limiter = LoginLimiter()
 MAX_ACTIVE_OPERATIONS = 8
 
 
 def require_login(func):
     @wraps(func)
     def wrapped(*args, **kwargs):
-        if not session.get('jwt_token'):
+        auth = auth_sessions.get(session.get('session_id'))
+        if auth is None:
+            session.clear()
             if request.path == '/':
                 return redirect(url_for('login_page'))
             return jsonify(error='Not authenticated'), 401
+        g.auth = auth
         return func(*args, **kwargs)
     return wrapped
 
 
 @app.before_request
 def check_origin():
+    # Old client-side JWT sessions must not survive this authentication migration.
+    if 'jwt_token' in session or 'user_name' in session:
+        session.clear()
     if request.method in ('POST', 'DELETE', 'PUT', 'PATCH'):
         origin = request.headers.get('Origin')
         if request.headers.get('Sec-Fetch-Site') == 'cross-site':
             return jsonify(error='Please use this website to perform this action'), 403
-        if origin and urlsplit(origin).netloc != request.host:
+        expected = urlsplit(request.host_url)
+        try:
+            supplied = urlsplit(origin) if origin else None
+        except ValueError:
+            return jsonify(error='Please use this website to perform this action'), 403
+        if supplied and (supplied.scheme != expected.scheme or supplied.netloc != expected.netloc
+                         or supplied.path or supplied.query or supplied.fragment):
             return jsonify(error='Please use this website to perform this action'), 403
 
 
@@ -81,6 +98,16 @@ def response_headers(response):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; script-src 'self'; "
+        "style-src 'self' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: https://warframe.market https://*.warframe.market; "
+        "connect-src 'self'; media-src 'self'; object-src 'none'; "
+        "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    )
+    if request.is_secure:
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000'
     if request.path != '/healthz' and not request.path.startswith('/assets/'):
         response.headers['Cache-Control'] = 'no-store'
     return response
@@ -90,7 +117,8 @@ def response_headers(response):
 def upstream_error(error):
     status = getattr(error.response, 'status_code', None)
     if status in (401, 403):
-        session.clear()
+        if request.endpoint != 'api_login':
+            revoke_session()
         return jsonify(error='Warframe Market rejected authentication. Please sign in again.'), 401
     if status == 429:
         return jsonify(error='Warframe Market is busy. Please wait before trying again.'), 503
@@ -123,7 +151,12 @@ def get_catalogue(token):
 
 
 def account_id():
-    return session['user_name'].casefold()
+    return g.auth['user_name'].casefold()
+
+
+def revoke_session():
+    auth_sessions.revoke(session.get('session_id'))
+    session.clear()
 
 
 def reserve_operation(user, kind):
@@ -201,24 +234,34 @@ def api_login():
     email, password = data.get('email'), data.get('password')
     if not isinstance(email, str) or not isinstance(password, str) or not email.strip() or not password:
         return jsonify(error='Email and password required'), 400
+    address = client_address(request.remote_addr, request.headers.get('X-Forwarded-For'), ON_RENDER)
+    retry_after = login_limiter.consume(email, address)
+    if retry_after:
+        response = jsonify(error='Too many sign-in attempts. Please try again later.')
+        response.headers['Retry-After'] = str(retry_after)
+        return response, 429
     if not login_slots.acquire(blocking=False):
-        return jsonify(error='Sign-in is busy. Please try again shortly.'), 429
+        response = jsonify(error='Sign-in is busy. Please try again shortly.')
+        response.headers['Retry-After'] = '5'
+        return response, 429
     try:
         user_name, token = login(email.strip(), password, WFM_API)
     finally:
         login_slots.release()
     if not token or not user_name:
         return jsonify(error='Invalid credentials'), 401
+    session_id = auth_sessions.create(user_name, token, replace_id=session.get('session_id'))
+    if session_id is None:
+        return jsonify(error='Sign-in is busy. Please try again later.'), 503
     session.clear()
     session.permanent = True
-    session['user_name'] = user_name
-    session['jwt_token'] = token
+    session['session_id'] = session_id
     return jsonify(success=True)
 
 
 @app.route('/logout', methods=['POST'])
 def logout():
-    session.clear()
+    revoke_session()
     return jsonify(success=True)
 
 
@@ -242,7 +285,7 @@ def status():
 @require_login
 def factions():
     try:
-        return jsonify(factions=list(get_catalogue(session['jwt_token'])['mods']))
+        return jsonify(factions=list(get_catalogue(g.auth['jwt_token'])['mods']))
     except requests.RequestException:
         raise
     except Exception:
@@ -252,10 +295,10 @@ def factions():
 @app.route('/factions/<faction_name>/mods')
 @require_login
 def faction_mods(faction_name):
-    data = get_catalogue(session['jwt_token'])
+    data = get_catalogue(g.auth['jwt_token'])
     if faction_name not in data['mods']:
         return jsonify(error='Faction not found'), 404
-    orders = get_orders(session['jwt_token'], WFM_API)['data']
+    orders = get_orders(g.auth['jwt_token'], WFM_API)['data']
     listed = {order['itemId']: order['id'] for order in orders if order.get('type') == 'sell'}
     return jsonify(faction=faction_name, mods=[{
         'name': mod['Name'], 'url_name': mod['URL_Name'], 'id': mod.get('id'),
@@ -275,16 +318,16 @@ def process():
         return jsonify(error='Select at least one syndicate'), 400
     if not positive_price(platinum):
         return jsonify(error='Platinum must be a positive whole number'), 400
-    mods = get_catalogue(session['jwt_token'])['mods']
+    mods = get_catalogue(g.auth['jwt_token'])['mods']
     if any(name not in mods for name in selected):
         return jsonify(error='Invalid syndicate'), 400
-    return start_batch(account_id(), session['jwt_token'], 'create', selected, platinum)
+    return start_batch(account_id(), g.auth['jwt_token'], 'create', selected, platinum)
 
 
 @app.route('/delete', methods=['POST'])
 @require_login
 def delete_batch():
-    return start_batch(account_id(), session['jwt_token'], 'delete')
+    return start_batch(account_id(), g.auth['jwt_token'], 'delete')
 
 
 @app.route('/api/mod/order', methods=['POST'])
@@ -298,7 +341,7 @@ def create_single_order():
         return jsonify(error='item_id is required'), 400
     if not positive_price(platinum):
         return jsonify(error='Platinum must be a positive whole number'), 400
-    user, token = account_id(), session['jwt_token']
+    user, token = account_id(), g.auth['jwt_token']
     job, error = reserve_operation(user, 'single')
     if error:
         return error
@@ -315,7 +358,7 @@ def create_single_order():
 @app.route('/api/mod/order/<order_id>', methods=['DELETE'])
 @require_login
 def delete_single_order(order_id):
-    user, token = account_id(), session['jwt_token']
+    user, token = account_id(), g.auth['jwt_token']
     job, error = reserve_operation(user, 'single')
     if error:
         return error

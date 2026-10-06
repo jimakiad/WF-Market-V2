@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'bac
 import app as server
 import create_orders as creator
 import delete_orders as deleter
+from security import LoginLimiter, SessionStore
 
 CATALOGUE = {
     'mods': {'Red Veil': [{'Name': 'Test Augment', 'URL_Name': 'test_augment', 'id': 'mod-1'}]},
@@ -23,6 +24,8 @@ class PublicHostingTests(unittest.TestCase):
         server.app.config.update(TESTING=True, SECRET_KEY='test-secret', SESSION_COOKIE_SECURE=False)
         server.operations.clear()
         server.batch_jobs.clear()
+        server.auth_sessions = SessionStore()
+        server.login_limiter = LoginLimiter()
         self.alice = self.client('Alice', 'JWT alice')
         self.bob = self.client('Bob', 'JWT bob')
         self.catalogue = patch.object(server, 'get_catalogue', return_value=CATALOGUE)
@@ -32,8 +35,7 @@ class PublicHostingTests(unittest.TestCase):
     def client(self, name, token):
         client = server.app.test_client()
         with client.session_transaction() as session:
-            session['user_name'] = name
-            session['jwt_token'] = token
+            session['session_id'] = server.auth_sessions.create(name, token)
         return client
 
     def test_health_static_and_authentication(self):
@@ -114,7 +116,9 @@ class PublicHostingTests(unittest.TestCase):
         self.assertIn('SameSite=Lax', response.headers['Set-Cookie'])
         with client.session_transaction() as session:
             self.assertNotIn('password', session)
-            self.assertEqual(session['jwt_token'], 'JWT alice')
+            self.assertNotIn('jwt_token', session)
+            self.assertNotIn('user_name', session)
+            self.assertEqual(server.auth_sessions.get(session['session_id'])['jwt_token'], 'JWT alice')
         self.assertEqual(client.post('/logout').status_code, 200)
         self.assertEqual(client.get('/status').status_code, 401)
 

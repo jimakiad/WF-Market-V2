@@ -18,6 +18,9 @@ def api_request(method, url, **kwargs):
             time.sleep(delay)
         _last_request = time.monotonic()
     kwargs.setdefault('timeout', (5, 20))
+    headers = dict(kwargs.pop('headers', {}))
+    headers.setdefault('User-Agent', 'WFMarketV2/2.0 (+https://wf-market-v2.onrender.com)')
+    kwargs['headers'] = headers
     response = requests.request(method, url, **kwargs)
     response.raise_for_status()
     return response
