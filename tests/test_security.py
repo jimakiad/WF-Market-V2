@@ -88,7 +88,9 @@ class AuthenticationSecurityTests(unittest.TestCase):
         copied = self.client.get_cookie('session').value
         response = requests.Response()
         response.status_code = 401
-        with patch.object(server, 'api_request', side_effect=requests.HTTPError(response=response)):
+        with patch.object(server, 'get_catalogue', return_value={'mods': {'Test': [{'id': 'test-mod'}]}}), patch.object(
+            server, 'api_request', side_effect=requests.HTTPError(response=response),
+        ):
             self.assertEqual(self.client.post('/api/mod/order', json={'item_id': 'test-mod', 'platinum': 12}).status_code, 401)
         replay = server.app.test_client()
         replay.set_cookie('session', copied)

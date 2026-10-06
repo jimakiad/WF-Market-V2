@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'bac
 import app as server
 import create_orders as creator
 import delete_orders as deleter
+import scrape_syndicate_mods as scraper
 from security import LoginLimiter, SessionStore
 
 CATALOGUE = {
@@ -90,6 +91,50 @@ class PublicHostingTests(unittest.TestCase):
         self.assertEqual(first['skipped'], 1)
         self.assertEqual(second['created'], 1)
         self.assertEqual(mutation.call_args.kwargs['headers']['Authorization'], 'Bearer bob')
+
+    def test_catalogue_preserves_regular_subtype_for_variant_augments(self):
+        html = '''<table class="wikitable"><tr><th>Mods</th><th>Factions</th></tr>
+            <tr><td><span data-param-source="Mods" data-param-name="Savage Silence"></span></td>
+            <td><span data-param-source="Factions" data-param-name="Red Veil"></span></td></tr>
+            <tr><td><span data-param-source="Mods" data-param-name="Test Augment"></span></td>
+            <td><span data-param-source="Factions" data-param-name="Red Veil"></span></td></tr></table>'''
+        items = [
+            {'id': 'savage', 'slug': 'savage_silence', 'subtypes': ['regular', 'atragraph']},
+            {'id': 'mod-1', 'slug': 'test_augment'},
+        ]
+        with patch.object(scraper.requests, 'get', return_value=Mock(text=html)):
+            mods = scraper.scrape_syndicate_mods(items)['Red Veil']
+        self.assertEqual(mods[0]['subtype'], 'regular')
+        self.assertNotIn('subtype', mods[1])
+
+    def test_single_and_batch_creation_select_regular_variant_only_when_required(self):
+        mods = {'Red Veil': [
+            {'Name': 'Savage Silence', 'id': 'savage', 'subtype': 'regular'},
+            {'Name': 'Test Augment', 'id': 'mod-1'},
+        ]}
+        with patch.object(server, 'get_catalogue', return_value={'mods': mods}), patch.object(
+            server, 'api_request', return_value=Mock(json=lambda: {'data': {'id': 'new-order'}}),
+        ) as mutation:
+            for item_id in ('savage', 'mod-1'):
+                response = self.alice.post('/api/mod/order', json={'item_id': item_id, 'platinum': 12})
+                self.assertEqual(response.status_code, 200)
+            single_payloads = [call.kwargs['json'] for call in mutation.call_args_list]
+        with patch.object(creator, 'get_orders', return_value={'data': []}), patch.object(
+            creator, 'api_request',
+        ) as mutation:
+            result = creator.create_orders('JWT alice', 'https://example.test', mods, ['Red Veil'], 12)
+            batch_payloads = [call.kwargs['json'] for call in mutation.call_args_list]
+        self.assertEqual(result['created'], 2)
+        self.assertEqual(single_payloads, batch_payloads)
+        self.assertEqual(single_payloads[0]['subtype'], 'regular')
+        self.assertNotIn('subtype', single_payloads[1])
+        self.assertTrue(all(payload['rank'] == 0 for payload in single_payloads))
+
+    def test_single_creation_rejects_unknown_mod_without_upstream_write(self):
+        with patch.object(server, 'api_request') as mutation:
+            response = self.alice.post('/api/mod/order', json={'item_id': 'unknown', 'platinum': 12})
+        self.assertEqual(response.status_code, 400)
+        mutation.assert_not_called()
 
     def test_deletion_only_targets_authenticated_users_augment_sells(self):
         orders = {'data': [

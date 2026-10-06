@@ -16,7 +16,7 @@ _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
-from create_orders import create_orders
+from create_orders import create_orders, sell_order_payload
 from delete_orders import delete_matching_orders
 from get_all_items import get_all_items
 from get_orders import get_orders
@@ -342,14 +342,16 @@ def create_single_order():
     if not positive_price(platinum):
         return jsonify(error='Platinum must be a positive whole number'), 400
     user, token = account_id(), g.auth['jwt_token']
+    mods = get_catalogue(token)['mods']
+    mod = next((mod for group in mods.values() for mod in group if mod.get('id') == item_id), None)
+    if mod is None:
+        return jsonify(error='Syndicate mod not found. Refresh the page and try again.'), 400
     job, error = reserve_operation(user, 'single')
     if error:
         return error
     try:
-        response = api_request('POST', f'{WFM_API}/v2/order', headers=auth_headers(token), json={
-            'itemId': item_id, 'type': 'sell', 'platinum': platinum,
-            'quantity': 1, 'visible': True, 'rank': 0,
-        })
+        response = api_request('POST', f'{WFM_API}/v2/order', headers=auth_headers(token),
+                               json=sell_order_payload(mod, platinum))
         return jsonify(success=True, order_id=response.json()['data']['id'])
     finally:
         finish_operation(user, job, state='complete')

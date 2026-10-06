@@ -65,6 +65,7 @@ def scrape_syndicate_mods(items_data=None):
 
     # Primary lookup: WFM slug
     slug_to_id = {item["slug"]: item["id"] for item in items_data}
+    items_by_id = {item['id']: item for item in items_data}
 
     # Secondary lookup: normalize the WFM item's own display name.
     # Handles cases where the wiki name differs slightly from the WFM slug.
@@ -88,6 +89,9 @@ def scrape_syndicate_mods(items_data=None):
             )
             if mod_id:
                 mod["id"] = mod_id
+                # Syndicates sell the regular augment, not the Atragraph variant.
+                if 'regular' in items_by_id[mod_id].get('subtypes', []):
+                    mod['subtype'] = 'regular'
 
     if persist:
         with open(os.path.join(DATA_DIR, 'augment_mods_by_syndicate.json'), 'w', encoding='utf-8') as f:
